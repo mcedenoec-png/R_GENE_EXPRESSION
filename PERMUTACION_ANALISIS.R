@@ -7,16 +7,6 @@
 
 # Author: Melannie Cedeño Valencia
 
-# --------------------------------------------------
-
-
-# Description:
-
-# This script performs RNA-seq data analysis in R, 
-
-# including metadata processing and raw count matrix import.
-#Analisis de permutacion de muestras RNA_seq para identificar falsos positivos
-#empiricos. 
 
 # --------------------------------------------------
 

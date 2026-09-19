@@ -1,3 +1,4 @@
+
 # --------------------------------------------------
 
 # RNA-seq Analysis in R
@@ -29,6 +30,7 @@ SALMON_DIR <- "C:/Users/mcede/Documents/TFM_2026/salmon_results"
 REFERENCE_DIR <- "C:/Users/mcede/Documents/TFM_2026/reference"
 
 # Definir directorio de trabajo para guardar salidas
+
 setwd(RESULTS_DIR)
 
 
@@ -46,13 +48,14 @@ library(dplyr)
 library(openxlsx)
 library(ggrepel)
 library(EnhancedVolcano)
+library(VennDiagram)
+library(grid)
 
+##########################################
 
-#########################
+##Se cargo el archivo de referencia 
 
-##CARGA DE ANOTACION
-
-#########################
+##########################################
 # Archivo GTF
 gtf_file <- file.path(
   REFERENCE_DIR,
@@ -63,6 +66,9 @@ cat("Importando GTF...\n")
 
 gtf <- import(gtf_file)
 
+
+
+##Se crea data frame tx2gene que relaciona los genes con transcritos.
 
 tx2gene <- unique(
   data.frame(
@@ -107,7 +113,6 @@ write.csv(
   row.names = FALSE
 )
 
-
 #########################
 
 #METADATOS
@@ -151,11 +156,11 @@ write.csv(
 
 print(metadata)
 
-#########################
+#######################################################
 
-##ARCHIVOS SALMON
+##ARCHIVOS SALMON - Creación de rutas a los archivos
 
-#########################
+#######################################################
 
 files <- file.path(
   SALMON_DIR,
@@ -173,8 +178,6 @@ files <- file.path(
 names(files) <- samples$sample
 
 print(file.exists(files))
-
-list.files(SALMON_DIR)
 
 #########################
 
@@ -226,9 +229,9 @@ dds <- DESeqDataSetFromTximport(
   design = ~ condition
 )
 
-#########################
+##############################
 # FILTRADO DE BAJA EXPRESION
-#########################
+##############################
 
 cat(
   "Genes antes del filtrado:",
@@ -260,6 +263,7 @@ cat(
 dds <- DESeq(dds)
 
 names(mcols(dds))
+
 ############################
 # GRAFICO DE DISPERSION
 ############################
@@ -426,45 +430,6 @@ write.xlsx(
   rowNames = FALSE
 )
 
-
-##########################################
-# RESUMEN DESEQ2 - TOP 50
-##########################################
-
-cat(
-  "\nTop 50 genes más significativos:\n"
-)
-
-sigdeseq_top50 <- head(
-    sig_deseq[
-      ,
-      c(
-        "gene_name",
-        "gene_id",
-        "gene_type",
-        "log2FoldChange",
-        "padj"
-      )
-    ],
-    50
-  )
-
-print(sigdeseq_top50)
-
-#########################
-# EXPORTAR TABLA TOP 50
-#########################
-
-write.xlsx(
-  sigdeseq_top50,
-  file.path(
-    RESULTS_DIR,
-    "SigDESeq2_top50_genes.xlsx"
-  ),
-  rowNames = FALSE
-)
-
-
 #########################
 # RESUMEN Sig_DESEQ2
 #########################
@@ -561,81 +526,6 @@ cat(
 )
 
 
-
-###############################
-# Genes presentes en JIA
-# y no detectados en Control
-# usando umbral de 10 conteos
-###############################
-
-# Matriz de conteos crudos
-counts_raw <- counts(dds)
-
-# Definir muestras
-control_samples <- c("SRR6006895", "SRR6006896", "SRR6006898")
-jia_samples <- c("SRR6006900", "SRR6006904", "SRR6006906")
-
-# Verificar que las muestras existan en la matriz de conteos
-all(control_samples %in% colnames(counts_raw))
-all(jia_samples %in% colnames(counts_raw))
-
-# Genes con >=10 conteos en al menos 2 muestras JIA
-# y <10 conteos en todas las muestras Control
-genes_jia_only_10 <- rownames(counts_raw)[
-  rowSums(counts_raw[, jia_samples, drop = FALSE] >= 10) >= 2 &
-    rowSums(counts_raw[, control_samples, drop = FALSE] >= 10) == 0
-]
-
-# Filtrar con estadística DESeq2
-genes_jia_only_10_significativos <- res_deseq[
-  res_deseq$gene_id %in% genes_jia_only_10 &
-    res_deseq$padj < 0.05 &
-    res_deseq$log2FoldChange > 0 &
-    res_deseq$stat > 0,
-]
-
-# Ordenar por padj
-genes_jia_only_10_significativos <- genes_jia_only_10_significativos[
-  order(genes_jia_only_10_significativos$padj),
-]
-
-# Extraer conteos de esos genes
-counts_jia_only_10 <- counts_raw[
-  genes_jia_only_10_significativos$gene_id,
-  ,
-  drop = FALSE
-]
-
-# Convertir conteos a data.frame
-counts_jia_only_10_df <- as.data.frame(counts_jia_only_10)
-
-# Agregar gene_id a la tabla de conteos
-counts_jia_only_10_df$gene_id <- rownames(counts_jia_only_10_df)
-
-# Unir resultados DESeq2 + conteos
-genes_jia_only_10_final <- merge(
-  genes_jia_only_10_significativos,
-  counts_jia_only_10_df,
-  by = "gene_id",
-  all.x = TRUE
-)
-
-# Ordenar nuevamente por padj después del merge
-genes_jia_only_10_final <- genes_jia_only_10_final[
-  order(genes_jia_only_10_final$padj),
-]
-
-# Ver dimensiones y primeros resultados
-dim(genes_jia_only_10_final)
-head(genes_jia_only_10_final)
-
-# Exportar resultados
-write.xlsx(
-  genes_jia_only_10_final,
-  file = "genes_presentes_JIA_no_control_umbral10.xlsx",
-  rowNames = FALSE
-)
-
 #########################
 
 # PCA
@@ -650,6 +540,8 @@ pca_data <- plotPCA(
   returnData = TRUE
 )
 
+pca_data$sample <- rownames(pca_data)
+
 percentVar <- round(
   100 * attr(pca_data, "percentVar")
 )
@@ -663,6 +555,12 @@ pca_plot <- ggplot(
   )
 ) +
   geom_point(size = 4) +
+  geom_text(
+    aes(label = sample),
+    vjust = -1,
+    size = 4.5,
+    show.legend = FALSE
+  ) +
   xlab(
     paste0(
       "PC1: ",
@@ -677,7 +575,15 @@ pca_plot <- ggplot(
       "%"
     )
   ) +
+  coord_cartesian(
+    xlim = c(-25, 30),
+    ylim = c(-30, 20)
+  ) +
+  
   theme_bw()
+
+print(pca_plot)
+
 
 ggsave(
   filename = file.path(
@@ -688,6 +594,7 @@ ggsave(
   width = 8,
   height = 6
 )
+
 
 
 #########################
@@ -849,7 +756,6 @@ cat(
   "\n"
 )
 
-
 ###############################################################
 # ANALISIS DE EXPRESION DIFERENCIAL CON edgeR
 # JIA vs CONTROL
@@ -1003,9 +909,6 @@ dge <- estimateDisp(
   design
 )
 
-
-
-
 ###############################################################
 # GRAFICO BCV
 ###############################################################
@@ -1023,6 +926,7 @@ png(
 plotBCV(dge)
 
 dev.off()
+
 ###############################################################
 # AJUSTE DEL MODELO GLM
 # Metodo menos conservador: Likelihood Ratio Test
@@ -1077,6 +981,7 @@ cat(
 )
 
 str(res_edger)
+
 ###############################################################
 # GUARDAR RESULTADOS COMPLETOS edgeR
 ###############################################################
@@ -1221,7 +1126,7 @@ write.xlsx(
 volcano_edger <- res_edger
 
 ############################
-# GENES A ETIQUETAR edgeR
+# Etiquetas de genes edgeR
 ############################
 
 genes_label_edger <- sig_edger$gene_name
@@ -1341,22 +1246,276 @@ cat(
 
 
 ###############################################################
-# COMPARACION DE LOG2FOLDCHANGE ENTRE LOS DOS METODOS
-#EVALUAR LA CORRELACIÓN DE LOS DATOS
+# APARTADO DE COMPARACION DE METODOS.
+###############################################################
+# DIRECTORIO PARA GRAFICOS Y RESULTADOS COMPARATIVOS
 ###############################################################
 
+COMP_DIR <- "C:/Users/mcede/Documents/TFM_2026/R_GENE_EXPRESSION/ANALISIS_COMPARATIVO"
 
+if (!dir.exists(COMP_DIR)) {
+  dir.create(COMP_DIR, recursive = TRUE)
+}
+
+###############################################################
+# DIAGRAMA DE VENN
+# COMPARACION DE TODOS LOS GENES ANALIZADOS POR DESeq2 Y edgeR
+###############################################################
+
+#########################
+# EXTRAER TODOS LOS GENES ANALIZADOS
+#########################
+
+genes_deseq_all <- unique(res_deseq$gene_id)
+genes_edger_all <- unique(res_edger$gene_id)
+
+#########################
+# CALCULAR GENES COMUNES Y EXCLUSIVOS
+#########################
+
+genes_comunes_all <- intersect(
+  genes_deseq_all,
+  genes_edger_all
+)
+
+genes_solo_deseq_all <- setdiff(
+  genes_deseq_all,
+  genes_edger_all
+)
+
+genes_solo_edger_all <- setdiff(
+  genes_edger_all,
+  genes_deseq_all
+)
+
+#########################
+# MOSTRAR CONTEOS
+#########################
+n_deseq_all <- length(genes_deseq_all)
+n_edger_all <- length(genes_edger_all)
+n_comunes_all <- length(genes_comunes_all)
+n_solo_deseq_all <- length(genes_solo_deseq_all)
+n_solo_edger_all <- length(genes_solo_edger_all)
+
+cat("Genes DESeq2:", n_deseq_all, "\n")
+cat("Genes edgeR:", n_edger_all, "\n")
+cat("Genes comunes:", n_comunes_all, "\n")
+cat("Genes solo DESeq2:", n_solo_deseq_all, "\n")
+cat("Genes solo edgeR:", n_solo_edger_all, "\n")
+
+#########################
+# CREAR VENN CLASICO
+#########################
+
+venn_all_plot <- draw.pairwise.venn(
+  area1 = n_deseq_all,
+  area2 = n_edger_all,
+  cross.area = n_comunes_all,
+  category = c("DESeq2", "edgeR"),
+  fill = c("lightblue", "orange"),
+  alpha = c(0.6, 0.6),
+  lty = "solid",
+  lwd = 2,
+  col = c("steelblue", "darkorange"),
+  cex = 1.8,
+  fontface = "bold",
+  cat.cex = 1.3,
+  cat.fontface = "bold",
+  cat.pos = c(180, 0),
+  cat.dist = c(0.08, 0.08),
+  cat.just = list(c(0.5, 0.5), c(0.5, 0.5)),
+  scaled = FALSE,
+  euler.d = FALSE
+)
+
+
+#########################
+# MOSTRAR EN R
+#########################
+
+grid.newpage()
+grid.draw(venn_all_plot)
+
+#########################
+# GUARDAR COMO PNG
+#########################
+
+png(
+  filename = file.path(
+    COMP_DIR,
+    "Venn_DESeq2_edgeR_all_genes.png"
+  ),
+  width = 1200,
+  height = 1000,
+  res = 150
+)
+
+grid.newpage()
+grid.draw(venn_all_plot)
+
+dev.off()
+
+
+
+###############################################################
+# COMPARACION DE LOG2FOLDCHANGE / LOGFC ENTRE DESEQ2 Y edgeR
+###############################################################
+
+# Crear tabla comparativa entre DESeq2 y edgeR
 comparison <- merge(
   res_deseq[, c("gene_id", "log2FoldChange", "padj")],
   res_edger[, c("gene_id", "logFC", "FDR")],
   by = "gene_id"
 )
+print(comparison)
 
-cor(
+# Calcular correlación entre ambos métodos
+cor_logfc <- cor(
   comparison$log2FoldChange,
   comparison$logFC,
   use = "complete.obs"
 )
+
+cat(
+  "Correlación entre log2FoldChange DESeq2 y logFC edgeR:",
+  cor_logfc,
+  "\n"
+)
+
+# Añadir anotación de genes
+comparison <- merge(
+  comparison,
+  gene_annotation,
+  by = "gene_id",
+  all.x = TRUE
+)
+
+# Reordenar columnas
+comparison <- comparison[
+  ,
+  c(
+    "gene_name",
+    "gene_id",
+    "gene_type",
+    "log2FoldChange",
+    "padj",
+    "logFC",
+    "FDR"
+  )
+]
+
+# Guardar tabla comparativa
+write.xlsx(
+  comparison,
+  file.path(
+    COMP_DIR,
+    "comparison_DESeq2_edgeR_logFC.xlsx"
+  ),
+  rowNames = FALSE
+)
+
+###############################################################
+# CLASIFICACION DE GENES PARA EL GRAFICO
+###############################################################
+
+comparison$Significant <- "No significativo"
+
+comparison$Significant[
+  comparison$padj < 0.05 &
+    comparison$FDR < 0.05 &
+    comparison$log2FoldChange > 1 &
+    comparison$logFC > 1
+] <- "Upregulated en ambos"
+
+comparison$Significant[
+  comparison$padj < 0.05 &
+    comparison$FDR < 0.05 &
+    comparison$log2FoldChange < -1 &
+    comparison$logFC < -1
+] <- "Downregulated en ambos"
+
+comparison$Significant[
+  comparison$padj < 0.05 &
+    abs(comparison$log2FoldChange) > 1 &
+    !(comparison$FDR < 0.05 &
+        abs(comparison$logFC) > 1)
+] <- "Significativo solo DESeq2"
+
+comparison$Significant[
+  comparison$FDR < 0.05 &
+    abs(comparison$logFC) > 1 &
+    !(comparison$padj < 0.05 &
+        abs(comparison$log2FoldChange) > 1)
+] <- "Significativo solo edgeR"
+
+###############################################################
+# CREAR GRAFICO DE DISPERSION
+###############################################################
+
+scatter_plot <- ggplot(
+  comparison,
+  aes(
+    x = log2FoldChange,
+    y = logFC,
+    color = Significant
+  )
+) +
+  geom_point(
+    alpha = 0.6,
+    size = 1.5
+  ) +
+  geom_smooth(
+    method = "lm",
+    se = FALSE,
+    color = "black",
+    linetype = "dashed"
+  ) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dotted"
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dotted"
+  ) +
+  scale_color_manual(
+    values = c(
+      "No significativo" = "grey80",
+      "Upregulated en ambos" = "forestgreen",
+      "Downregulated en ambos" = "royalblue",
+      "Significativo solo DESeq2" = "orange",
+      "Significativo solo edgeR" = "purple"
+    )
+  ) +
+  theme_bw() +
+  labs(
+    title = "Comparación de cambios de expresión entre DESeq2 y edgeR",
+    subtitle = paste0(
+      "Correlación entre log2FoldChange y logFC = ",
+      round(cor_logfc, 3)
+    ),
+    x = "log2FoldChange DESeq2",
+    y = "logFC edgeR",
+    color = "Clasificación"
+  )
+
+print(scatter_plot)
+
+###############################################################
+# GUARDAR GRAFICO
+###############################################################
+
+ggsave(
+  filename = file.path(
+    COMP_DIR,
+    "comparison_DESeq2_edgeR_logFC_scatter.png"
+  ),
+  plot = scatter_plot,
+  width = 9,
+  height = 7,
+  dpi = 300
+)
+
 
 #########################
 # GUARDAR ENTORNO DE R
@@ -1374,6 +1533,5 @@ cat(
   RESULTS_DIR,
   "\n"
 )
-
 
 
